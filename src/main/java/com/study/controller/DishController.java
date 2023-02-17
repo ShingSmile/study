@@ -13,9 +13,11 @@ import com.study.service.DishService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @RestController
@@ -29,11 +31,15 @@ public class DishController {
     private CategoryService categoryService;
     @Autowired
     private DishFlavorService dishFlavorService;
+    @Autowired
+    private RedisTemplate redisTemplate;
 
     @PostMapping
     public Result<String> save(@RequestBody DishDto dishDto) {
         log.info("接收到的数据为：{}",dishDto);
         dishService.saveWithFlavor(dishDto);
+        String key = "dish_" + dishDto.getCategoryId() + "_1";
+        redisTemplate.delete(key);
         return Result.success("菜品添加成功！");
     }
 
@@ -90,11 +96,20 @@ public class DishController {
     public Result<String> update(@RequestBody DishDto dishDto) {
         log.info("接收到的数据为：{}", dishDto);
         dishService.updateWithFlavor(dishDto);
+        String key = "dish_" + dishDto.getCategoryId() + "_1";
+        redisTemplate.delete(key);
         return Result.success("修改菜品成功");
     }
 
     @GetMapping("/list")
     public Result<List<DishDto>> get(Dish dish) {
+        List<DishDto> dishDtoList;
+        String key = "dish_" + dish.getCategoryId() + "_" + dish.getStatus();
+        dishDtoList = (List<DishDto>) redisTemplate.opsForValue().get(key);
+        //如果有，则直接返回
+        if (dishDtoList != null){
+            return Result.success(dishDtoList);
+        }
         //条件查询器
         LambdaQueryWrapper<Dish> queryWrapper = new LambdaQueryWrapper<>();
         //根据传进来的categoryId查询
@@ -107,7 +122,7 @@ public class DishController {
         List<Dish> list = dishService.list(queryWrapper);
         log.info("查询到的菜品信息list:{}",list);
         //item就是list中的每一条数据，相当于遍历了
-        List<DishDto> dishDtoList = list.stream().map((item) -> {
+         dishDtoList = list.stream().map((item) -> {
             //创建一个dishDto对象
             DishDto dishDto = new DishDto();
             //将item的属性全都copy到dishDto里
@@ -134,6 +149,8 @@ public class DishController {
             return dishDto;
             //将所有返回结果收集起来，封装成List
         }).collect(Collectors.toList());
+        //将查询的结果让Redis缓存，设置存活时间为60分钟
+        redisTemplate.opsForValue().set(key,dishDtoList,60, TimeUnit.MINUTES);
         return Result.success(dishDtoList);
     }
 
