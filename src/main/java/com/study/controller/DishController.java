@@ -4,9 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.study.common.Category;
 import com.study.common.Dish;
+import com.study.common.DishFlavor;
 import com.study.common.Result;
 import com.study.dto.DishDto;
 import com.study.service.CategoryService;
+import com.study.service.DishFlavorService;
 import com.study.service.DishService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -25,8 +27,8 @@ public class DishController {
     private DishService dishService;
     @Autowired
     private CategoryService categoryService;
-//    @Autowired
-//    private DishFlavorService dishFlavorService;
+    @Autowired
+    private DishFlavorService dishFlavorService;
 
     @PostMapping
     public Result<String> save(@RequestBody DishDto dishDto) {
@@ -92,7 +94,7 @@ public class DishController {
     }
 
     @GetMapping("/list")
-    public Result<List<Dish>> get(Dish dish) {
+    public Result<List<DishDto>> get(Dish dish) {
         //条件查询器
         LambdaQueryWrapper<Dish> queryWrapper = new LambdaQueryWrapper<>();
         //根据传进来的categoryId查询
@@ -103,7 +105,36 @@ public class DishController {
         queryWrapper.orderByAsc(Dish::getSort).orderByDesc(Dish::getUpdateTime);
         //获取查询到的结果作为返回值
         List<Dish> list = dishService.list(queryWrapper);
-        return Result.success(list);
+        log.info("查询到的菜品信息list:{}",list);
+        //item就是list中的每一条数据，相当于遍历了
+        List<DishDto> dishDtoList = list.stream().map((item) -> {
+            //创建一个dishDto对象
+            DishDto dishDto = new DishDto();
+            //将item的属性全都copy到dishDto里
+            BeanUtils.copyProperties(item, dishDto);
+            //由于dish表中没有categoryName属性，只存了categoryId
+            Long categoryId = item.getCategoryId();
+            //所以我们要根据categoryId查询对应的category
+            Category category = categoryService.getById(categoryId);
+            if (category != null) {
+                //然后取出categoryName，赋值给dishDto
+                dishDto.setCategoryName(category.getName());
+            }
+            //然后获取一下菜品id，根据菜品id去dishFlavor表中查询对应的口味，并赋值给dishDto
+            Long itemId = item.getId();
+            //条件构造器
+            LambdaQueryWrapper<DishFlavor> lambdaQueryWrapper = new LambdaQueryWrapper<>();
+            //条件就是菜品id
+            lambdaQueryWrapper.eq(itemId != null, DishFlavor::getDishId, itemId);
+            //根据菜品id，查询到菜品口味
+            List<DishFlavor> flavors = dishFlavorService.list(lambdaQueryWrapper);
+            //赋给dishDto的对应属性
+            dishDto.setFlavors(flavors);
+            //并将dishDto作为结果返回
+            return dishDto;
+            //将所有返回结果收集起来，封装成List
+        }).collect(Collectors.toList());
+        return Result.success(dishDtoList);
     }
 
 }
